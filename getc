@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+
+function getc_foreach_direct_dependency {
+  cat dependencies.txt 2> /dev/null | while read -a LINE; do
+    NAME=${LINE[0]}
+    URL=${LINE[1]}
+
+    DEP_DIR="$TARGET_DIR/$NAME"
+
+    $* "$NAME" "$URL" "$DEP_DIR"
+  done
+}
+
+function getc_foreach_dependency_aux {
+    $*
+    ( cd "$DEP_DIR"; getc_foreach_dependency $1 )
+}
+
+function getc_foreach_dependency {
+  getc_foreach_direct_dependency getc_foreach_dependency_aux $1
+}
+
+function getc_setup_dependency {
+  if [ -d "$3" ]; then
+    echo "using $1"
+  else
+    echo "installing $1"
+    git clone -q "$2" "$3"
+  fi
+
+  (
+    cd "$3"
+    TARGET_DIR="$TARGET_DIR" getc install
+    TARGET_DIR="$TARGET_DIR" getc make
+  )
+}
+
+function getc_print_cxxflags {
+  echo -n "-I\"$3/src/\" "
+}
+
+function getc_print_ldflags {
+  echo -n "-L\"$3/\" -l$1 "
+}
+
+function getc_install {
+  mkdir -p "$TARGET_DIR"
+
+  getc_foreach_direct_dependency getc_setup_dependency
+}
+
+function getc_exec {
+  CXXFLAGS="$(getc_foreach_dependency getc_print_cxxflags)"
+  LDFLAGS="$(getc_foreach_dependency getc_print_ldflags)"
+
+  LDFLAGS="$LDFLAGS" CXXFLAGS="$CXXFLAGS" exec $*
+}
+
+function getc {
+  TARGET_DIR=${TARGET_DIR-"$PWD/vendor"}
+
+  case $1 in
+    install )
+      getc_install
+      ;;
+
+    exec )
+      shift
+      getc_exec $*
+      ;;
+
+    deps )
+      getc_foreach_dependency echo
+      ;;
+
+    make )
+      getc_exec make --quiet
+      ;;
+  esac
+}
+
+getc $*
