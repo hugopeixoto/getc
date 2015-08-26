@@ -13,7 +13,7 @@ function getc_foreach_direct_dependency {
 
 function getc_foreach_dependency_aux {
     $*
-    ( cd "$DEP_DIR"; getc_foreach_dependency $1 )
+    ( cd "$DEP_DIR" && getc_foreach_dependency $1 ) 2> /dev/null
 }
 
 function getc_foreach_dependency {
@@ -36,11 +36,11 @@ function getc_setup_dependency {
 }
 
 function getc_print_cxxflags {
-  echo -n "-I\"$3/src/\" "
+  (cd "$3" && make cxxflags)
 }
 
 function getc_print_ldflags {
-  echo -n "-L\"$3/\" -l$1 "
+  (cd "$3" && make ldflags)
 }
 
 function getc_install {
@@ -50,9 +50,8 @@ function getc_install {
 }
 
 function getc_exec {
-  CXXFLAGS="$(getc_foreach_dependency getc_print_cxxflags)"
-  LDFLAGS="$(getc_foreach_dependency getc_print_ldflags)"
-
+  CXXFLAGS="$(getc_foreach_dependency getc_print_cxxflags | paste -s -d ' ')"
+  LDFLAGS="$(getc_foreach_dependency getc_print_ldflags | paste -s -d ' ')"
   LDFLAGS="$LDFLAGS" CXXFLAGS="$CXXFLAGS" exec $*
 }
 
