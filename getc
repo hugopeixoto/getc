@@ -36,11 +36,11 @@ function getc_setup_dependency {
 }
 
 function getc_print_cxxflags {
-  (cd "$3" && make cxxflags)
+  (cd "$3" && make --quiet -f getc.mk cxxflags)
 }
 
 function getc_print_ldflags {
-  (cd "$3" && make ldflags)
+  (cd "$3" && make --quiet -f getc.mk ldflags)
 }
 
 function getc_install {
