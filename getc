@@ -1,64 +1,90 @@
-#!/usr/bin/env bash
+#!/usr/bin/env sh
 
-function getc_foreach_direct_dependency {
-  cat dependencies.txt 2> /dev/null | while read -a LINE; do
-    NAME=${LINE[0]}
-    URL=${LINE[1]}
-
-    DEP_DIR="$TARGET_DIR/$NAME"
-
-    $* "$NAME" "$URL" "$DEP_DIR"
-  done
+getc_log() {
+  echo "$*" >&2
 }
 
-function getc_foreach_dependency_aux {
-    $*
-    ( cd "$DEP_DIR" && getc_foreach_dependency $1 ) 2> /dev/null
-}
-
-function getc_foreach_dependency {
-  getc_foreach_direct_dependency getc_foreach_dependency_aux $1
-}
-
-function getc_setup_dependency {
-  if [ -d "$3" ]; then
-    echo "using $1"
-  else
-    echo "installing $1"
-    git clone -q "$2" "$3"
+getc_dependencies() {
+  if [ ! -d "$1" ]; then
+    return 127
   fi
 
-  (
-    cd "$3"
-    TARGET_DIR="$TARGET_DIR" getc install
-    TARGET_DIR="$TARGET_DIR" getc make
-  )
+  if [ ! -f "$1/dependencies.txt" ]; then
+    return 0
+  fi
+
+  while read -r URL; do
+    local DEP_DIR="$TARGET_DIR/$(echo "$URL" | sha256sum | head -c 10)"
+
+    if [ "$3" = "pre" ]; then
+      "$2" "$URL" "$DEP_DIR" || return 126
+      getc_dependencies "$DEP_DIR" "$2" "$3" || return 125
+    else
+      getc_dependencies "$DEP_DIR" "$2" "$3" || return 124
+      "$2" "$URL" "$DEP_DIR" || return 123
+    fi
+  done < "$1/dependencies.txt"
 }
 
-function getc_print_cxxflags {
-  (cd "$3" && make --quiet -f getc.mk cxxflags)
+getc_foreach_dependency_pre() {
+  getc_dependencies "$PWD" "$1" pre
 }
 
-function getc_print_ldflags {
-  (cd "$3" && make --quiet -f getc.mk ldflags)
+getc_foreach_dependency_post() {
+  getc_dependencies "$PWD" "$1" post
 }
 
-function getc_install {
-  mkdir -p "$TARGET_DIR"
-
-  getc_foreach_direct_dependency getc_setup_dependency
+getc_setup_dependency() {
+  [ ! -d "$2" ] && getc_fetch "$1" "$2"
 }
 
-function getc_exec {
-  CXXFLAGS="$(getc_foreach_dependency getc_print_cxxflags | paste -s -d ' ')"
-  LDFLAGS="$(getc_foreach_dependency getc_print_ldflags | paste -s -d ' ')"
-  LDFLAGS="$LDFLAGS" CXXFLAGS="$CXXFLAGS" exec $*
+getc_print_cxxflags() {
+  make --quiet -f "$2/getc.mk" cxxflags
 }
 
-function getc {
-  TARGET_DIR=${TARGET_DIR-"$PWD/vendor"}
+getc_print_ldflags() {
+  make --quiet -f "$2/getc.mk" ldflags
+}
 
-  case $1 in
+getc_make() {
+  getc_exec make --quiet -f "getc.mk"
+}
+
+getc_build() {
+  (cd "$2" && getc_make)
+}
+
+getc_update() {
+  getc_log "installing $1"
+  git -C "$2" pull
+}
+
+getc_fetch() {
+  getc_log "installing $1"
+  git clone --depth 1 --single-branch -q "$1" "$2"
+}
+
+getc_cxxflags() {
+  getc_foreach_dependency_pre getc_print_cxxflags | paste -s -d ' '
+}
+
+getc_ldflags() {
+  getc_foreach_dependency_pre getc_print_ldflags | paste -s -d ' '
+}
+
+getc_exec() {
+  LDFLAGS="$(getc_ldflags)" CXXFLAGS="$(getc_cxxflags)" $*
+}
+
+getc_install() {
+  getc_foreach_dependency_pre getc_setup_dependency
+  getc_foreach_dependency_post getc_build
+}
+
+getc() {
+  TARGET_DIR="${TARGET_DIR-"$PWD/vendor"}"
+
+  case "$1" in
     install )
       getc_install
       ;;
@@ -68,12 +94,17 @@ function getc {
       getc_exec $*
       ;;
 
+    update )
+      getc_foreach_dependency_pre getc_update
+      ;;
+
     deps )
-      getc_foreach_dependency echo
+      getc_foreach_dependency_pre echo
       ;;
 
     make )
-      getc_exec make --quiet -f getc.mk
+      getc_install
+      getc_make
       ;;
   esac
 }
